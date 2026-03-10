@@ -134,7 +134,7 @@ jobs:
           cp Dockerfile.template Dockerfile
           sed -i "s/{{VERSION}}/v$LATEST_VERSION/g" Dockerfile
 
-          LOCAL_IMAGE="ghcr.io/${{ github.repository }}:v${LATEST_VERSION}"
+          LOCAL_IMAGE="ghcr.io/${{ github.repository }}:${LATEST_VERSION}"
           LOCAL_IMAGE=$(echo "$LOCAL_IMAGE" | tr '[:upper:]' '[:lower:]')
 
           docker build -t "$LOCAL_IMAGE" .
