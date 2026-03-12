@@ -34,7 +34,7 @@ jobs:
   check-and-update:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
       packages: write
     steps:
       - name: Checkout repository
@@ -118,10 +118,6 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install lzc-cli
-        if: steps.check-update.outputs.update_needed == 'true'
-        run: npm install -g @lazycatcloud/lzc-cli
-
       - name: Login to GHCR
         if: steps.check-update.outputs.update_needed == 'true'
         uses: docker/login-action@v3
@@ -133,27 +129,10 @@ jobs:
       - name: Build and push image
         if: steps.check-update.outputs.update_needed == 'true'
         id: build-image
-        env:
-          LZC_CLI_TOKEN: ${{ secrets.LZC_CLI_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           LATEST_VERSION="${{ steps.get-version.outputs.latest_version }}"
           LOCAL_IMAGE="ghcr.io/${{ github.repository }}:v${LATEST_VERSION}"
           LOCAL_IMAGE=$(echo "$LOCAL_IMAGE" | tr '[:upper:]' '[:lower:]')
-          CACHE_KEY="${{ env.PROJECT_NAME_LOWER }}:v${LATEST_VERSION}"
-
-          if [ "${{ inputs.force_build }}" != "true" ]; then
-            EXISTING_IMAGE=$(lzc-cli appstore my-images 2>&1 | grep "$CACHE_KEY" | grep -oE 'registry\.lazycat\.cloud/[a-zA-Z0-9_/.:-]+' | head -1 || true)
-            if [ -n "$EXISTING_IMAGE" ]; then
-              echo "Found existing image cache: $EXISTING_IMAGE"
-              echo "ghcr_image=$LOCAL_IMAGE" >> $GITHUB_OUTPUT
-              echo "accelerated_url=$EXISTING_IMAGE" >> $GITHUB_OUTPUT
-              echo "version=$LATEST_VERSION" >> $GITHUB_OUTPUT
-              exit 0
-            fi
-          else
-            echo "Force build enabled, skipping cached image lookup"
-          fi
 
           echo "Building from custom Dockerfile..."
 
@@ -164,77 +143,5 @@ jobs:
 
           docker push "$LOCAL_IMAGE"
 
-          COPY_OUTPUT=$(lzc-cli appstore copy-image "$LOCAL_IMAGE" 2>&1)
-          echo "$COPY_OUTPUT"
-          ACCELERATED_URL=$(echo "$COPY_OUTPUT" | grep -oE 'registry\.lazycat\.cloud/[a-zA-Z0-9_/.:-]+' | head -1 || true)
-          if [ -z "$ACCELERATED_URL" ]; then
-            echo "Failed to get LazyCat accelerated image URL"
-            exit 1
-          fi
-
           echo "ghcr_image=$LOCAL_IMAGE" >> $GITHUB_OUTPUT
-          echo "accelerated_url=$ACCELERATED_URL" >> $GITHUB_OUTPUT
           echo "version=$LATEST_VERSION" >> $GITHUB_OUTPUT
-
-      - name: Update manifest
-        if: steps.check-update.outputs.update_needed == 'true'
-        env:
-          ACCELERATED_URL: ${{ steps.build-image.outputs.accelerated_url }}
-          LATEST_VERSION: ${{ steps.build-image.outputs.version }}
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import os
-          import re
-
-          manifest_path = Path("lzc-manifest.yml")
-          content = manifest_path.read_text()
-          accelerated_url = os.environ["ACCELERATED_URL"]
-
-          pattern = re.compile(
-              r"(^  gitnexus:\n(?:    .*\n)*?    image: )([^\n]+)",
-              re.MULTILINE,
-          )
-          updated, count = pattern.subn(r"\1" + accelerated_url, content, count=1)
-          if count != 1:
-              raise SystemExit("Failed to update services.gitnexus.image in lzc-manifest.yml")
-
-          manifest_path.write_text(updated)
-          PY
-          sed -i "s/^version:.*/version: $LATEST_VERSION/g" lzc-manifest.yml
-
-          echo "Updated to version: $LATEST_VERSION"
-          echo "Updated image: $ACCELERATED_URL"
-
-      - name: Build package
-        if: steps.check-update.outputs.update_needed == 'true'
-        env:
-          LZC_CLI_TOKEN: ${{ secrets.LZC_CLI_TOKEN }}
-        run: |
-          lzc-cli project build -o ${{ env.PROJECT_NAME_LOWER }}.lpk
-
-      - name: Verify packaged manifest
-        if: steps.check-update.outputs.update_needed == 'true'
-        env:
-          ACCELERATED_URL: ${{ steps.build-image.outputs.accelerated_url }}
-        run: |
-          TMP_DIR=$(mktemp -d)
-          unzip -q "${{ env.PROJECT_NAME_LOWER }}.lpk" -d "$TMP_DIR"
-          grep -q "${ACCELERATED_URL}" "$TMP_DIR/manifest.yml"
-          sed -n '/^application:/,/^services:/p' "$TMP_DIR/manifest.yml"
-
-      - name: Create GitHub Release
-        if: steps.check-update.outputs.update_needed == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          LATEST_VERSION="${{ steps.build-image.outputs.version }}"
-          lpkg_file="${{ env.PROJECT_NAME_LOWER }}.lpk"
-          
-          if [ -f "$lpkg_file" ]; then
-            gh release delete "v$LATEST_VERSION" --yes 2>/dev/null || true
-            gh release create "v$LATEST_VERSION" \
-              --title "v$LATEST_VERSION" \
-              --notes-file /tmp/release_notes.txt \
-              "$lpkg_file"
-          fi
