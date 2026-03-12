@@ -18,7 +18,7 @@ application:
       disable_trim_location: true
 services:
   gitnexus:
-    image: registry.lazycat.cloud/invokerlaw/codeeagle/gitnexus:2fd0873a13926246
+    image: registry.lazycat.cloud/invokerlaw/codeeagle/gitnexus:7e28af2b44004b89
     environment:
       - NODE_ENV=production
       - HOME=/data
