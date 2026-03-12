@@ -3,8 +3,10 @@ set -e
 
 echo "Starting GitNexus services..."
 
-# 创建 gitnexus registry 目录
-mkdir -p /root/.gitnexus
+# 强制使用可持久化可写目录，避免 sqlite "Unable to open database file"
+export HOME=/data
+export GITNEXUS_REGISTRY_DIR=/data/gitnexus-registry
+mkdir -p "$GITNEXUS_REGISTRY_DIR"
 
 # 启动前端静态文件服务 (端口 5173)
 # Note: serve doesn't support --header flag, headers are handled by nginx

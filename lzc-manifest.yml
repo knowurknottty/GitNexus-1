@@ -21,9 +21,11 @@ services:
     image: registry.lazycat.cloud/invokerlaw/codeeagle/gitnexus:318898124522925c
     environment:
       - NODE_ENV=production
+      - HOME=/data
+      - GITNEXUS_REGISTRY_DIR=/data/gitnexus-registry
     binds:
       - /lzcapp/var/data:/data
-      - /lzcapp/var/data/gitnexus-registry:/root/.gitnexus
+      - /lzcapp/var/data/gitnexus-registry:/data/gitnexus-registry
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/"]
       interval: 10s
