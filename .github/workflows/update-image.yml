@@ -34,7 +34,7 @@ jobs:
   check-and-update:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       packages: write
     steps:
       - name: Checkout repository
@@ -134,20 +134,57 @@ jobs:
           cp Dockerfile.template Dockerfile
           sed -i "s/{{VERSION}}/v$LATEST_VERSION/g" Dockerfile
 
-          GHCR_REPO=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
-          LOCAL_IMAGE="ghcr.io/${GHCR_REPO}:${LATEST_VERSION}"
-          LOCAL_IMAGE_WITH_V="ghcr.io/${GHCR_REPO}:v${LATEST_VERSION}"
+          LOCAL_IMAGE="ghcr.io/${{ github.repository }}:v${LATEST_VERSION}"
+          LOCAL_IMAGE=$(echo "$LOCAL_IMAGE" | tr '[:upper:]' '[:lower:]')
 
           docker build -t "$LOCAL_IMAGE" .
-          docker tag "$LOCAL_IMAGE" "$LOCAL_IMAGE_WITH_V"
 
           docker push "$LOCAL_IMAGE"
-          docker push "$LOCAL_IMAGE_WITH_V"
 
           echo "ghcr_image=$LOCAL_IMAGE" >> $GITHUB_OUTPUT
+          echo "accelerated_url=$LOCAL_IMAGE" >> $GITHUB_OUTPUT
           echo "version=$LATEST_VERSION" >> $GITHUB_OUTPUT
 
-      - name: Print pushed image
+      - name: Update manifest version
         if: steps.check-update.outputs.update_needed == 'true'
         run: |
-          echo "Built and pushed image: ghcr.io/${{ github.repository }}:${{ steps.get-version.outputs.latest_version }}"
+          LATEST_VERSION="${{ steps.build-image.outputs.version }}"
+          ACCELERATED_URL="${{ steps.build-image.outputs.accelerated_url }}"
+          GHCR_IMAGE="${{ steps.build-image.outputs.ghcr_image }}"
+          CURRENT_IMAGE=$(grep 'image:' lzc-manifest.yml | head -1 | awk '{print $2}')
+
+          IMAGE_TO_USE="$ACCELERATED_URL"
+          if [ -z "$IMAGE_TO_USE" ]; then
+            IMAGE_TO_USE="$GHCR_IMAGE"
+          fi
+          if [ -z "$IMAGE_TO_USE" ]; then
+            IMAGE_TO_USE="$CURRENT_IMAGE"
+          fi
+
+          sed -i "s/^version:.*/version: $LATEST_VERSION/g" lzc-manifest.yml
+          if [ -n "$IMAGE_TO_USE" ]; then
+            sed -i "s|image: .*|image: $IMAGE_TO_USE|g" lzc-manifest.yml
+          fi
+
+      - name: Build package
+        if: steps.check-update.outputs.update_needed == 'true'
+        env:
+          LZC_CLI_TOKEN: ${{ secrets.LZC_CLI_TOKEN }}
+        run: |
+          lzc-cli project build -o ${{ env.PROJECT_NAME_LOWER }}.lpk || true
+
+      - name: Create GitHub Release
+        if: steps.check-update.outputs.update_needed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          LATEST_VERSION="${{ steps.build-image.outputs.version }}"
+          lpkg_file="${{ env.PROJECT_NAME_LOWER }}.lpk"
+          
+          if [ -f "$lpkg_file" ]; then
+            gh release delete "v$LATEST_VERSION" --yes 2>/dev/null || true
+            gh release create "v$LATEST_VERSION" \
+              --title "v$LATEST_VERSION" \
+              --notes-file /tmp/release_notes.txt \
+              "$lpkg_file"
+          fi

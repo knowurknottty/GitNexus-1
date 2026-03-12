@@ -38,6 +38,7 @@ COPY --from=builder /app/node_modules ./node_modules
 # Copy nginx config and entrypoint
 COPY docker/nginx.conf /etc/nginx/nginx.conf
 COPY docker/entrypoint.sh /entrypoint.sh
+COPY docker/proxy-server.mjs /proxy-server.mjs
 RUN chmod +x /entrypoint.sh
 
 # Create gitnexus registry directory

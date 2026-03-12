@@ -11,6 +11,10 @@ mkdir -p /root/.gitnexus
 echo "Starting frontend server on port 5173..."
 serve -s dist -l 5173 &
 
+# 启动本地 GitHub 代理服务 (端口 8787)
+echo "Starting git proxy server on port 8787..."
+node /proxy-server.mjs &
+
 # 等待前端启动
 sleep 2
 
