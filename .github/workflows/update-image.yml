@@ -133,15 +133,23 @@ jobs:
           LATEST_VERSION="${{ steps.get-version.outputs.latest_version }}"
           LOCAL_IMAGE="ghcr.io/${{ github.repository }}:v${LATEST_VERSION}"
           LOCAL_IMAGE=$(echo "$LOCAL_IMAGE" | tr '[:upper:]' '[:lower:]')
+          SHA_TAG=$(echo "${GITHUB_SHA}" | cut -c1-12)
+          LOCAL_IMAGE_SHA="ghcr.io/${{ github.repository }}:${SHA_TAG}"
+          LOCAL_IMAGE_SHA=$(echo "$LOCAL_IMAGE_SHA" | tr '[:upper:]' '[:lower:]')
 
           echo "Building from custom Dockerfile..."
+          echo "Version tag: $LOCAL_IMAGE"
+          echo "Immutable SHA tag: $LOCAL_IMAGE_SHA"
 
           cp Dockerfile.template Dockerfile
           sed -i "s/{{VERSION}}/v$LATEST_VERSION/g" Dockerfile
 
-          docker build -t "$LOCAL_IMAGE" .
+          docker build -t "$LOCAL_IMAGE" -t "$LOCAL_IMAGE_SHA" .
 
           docker push "$LOCAL_IMAGE"
+          docker push "$LOCAL_IMAGE_SHA"
 
           echo "ghcr_image=$LOCAL_IMAGE" >> $GITHUB_OUTPUT
+          echo "ghcr_sha_image=$LOCAL_IMAGE_SHA" >> $GITHUB_OUTPUT
+          echo "sha_tag=$SHA_TAG" >> $GITHUB_OUTPUT
           echo "version=$LATEST_VERSION" >> $GITHUB_OUTPUT
