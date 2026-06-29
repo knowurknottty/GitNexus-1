@@ -36,6 +36,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -112,6 +113,18 @@ jobs:
             echo "Already on latest version"
           fi
 
+      - name: Set up QEMU
+        if: steps.check-update.outputs.update_needed == 'true'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64
+
+      - name: Set up Docker Buildx
+        if: steps.check-update.outputs.update_needed == 'true'
+        uses: docker/setup-buildx-action@v3
+        with:
+          buildkitd-flags: --debug
+
       - name: Setup Node.js
         if: steps.check-update.outputs.update_needed == 'true'
         uses: actions/setup-node@v4
@@ -126,30 +139,45 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push image
+      - name: Build and push multi-arch image
         if: steps.check-update.outputs.update_needed == 'true'
         id: build-image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.template
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:v${{ steps.get-version.outputs.latest_version }}
+            ghcr.io/${{ github.repository }}:${{ github.sha }}
+          build-args: |
+            VERSION=v${{ steps.get-version.outputs.latest_version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+          sbom: true
+
+      - name: Update lzc-manifest.yml
+        if: steps.check-update.outputs.update_needed == 'true'
         run: |
           LATEST_VERSION="${{ steps.get-version.outputs.latest_version }}"
-          LOCAL_IMAGE="ghcr.io/${{ github.repository }}:v${LATEST_VERSION}"
-          LOCAL_IMAGE=$(echo "$LOCAL_IMAGE" | tr '[:upper:]' '[:lower:]')
-          SHA_TAG=$(echo "${GITHUB_SHA}" | cut -c1-12)
-          LOCAL_IMAGE_SHA="ghcr.io/${{ github.repository }}:${SHA_TAG}"
-          LOCAL_IMAGE_SHA=$(echo "$LOCAL_IMAGE_SHA" | tr '[:upper:]' '[:lower:]')
+          NEW_IMAGE="ghcr.io/${{ github.repository }}:v${LATEST_VERSION}"
+          NEW_IMAGE=$(echo "$NEW_IMAGE" | tr '[:upper:]' '[:lower:]')
+          sed -i "s|image: .*|image: ${NEW_IMAGE}|" lzc-manifest.yml
+          echo "Updated lzc-manifest.yml image to: $NEW_IMAGE"
 
-          echo "Building from custom Dockerfile..."
-          echo "Version tag: $LOCAL_IMAGE"
-          echo "Immutable SHA tag: $LOCAL_IMAGE_SHA"
+      - name: Commit and push manifest update
+        if: steps.check-update.outputs.update_needed == 'true'
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: update GitNexus image to v${{ steps.get-version.outputs.latest_version }}"
+          file_pattern: lzc-manifest.yml
 
-          cp Dockerfile.template Dockerfile
-          sed -i "s/{{VERSION}}/v$LATEST_VERSION/g" Dockerfile
-
-          docker build -t "$LOCAL_IMAGE" -t "$LOCAL_IMAGE_SHA" .
-
-          docker push "$LOCAL_IMAGE"
-          docker push "$LOCAL_IMAGE_SHA"
-
-          echo "ghcr_image=$LOCAL_IMAGE" >> $GITHUB_OUTPUT
-          echo "ghcr_sha_image=$LOCAL_IMAGE_SHA" >> $GITHUB_OUTPUT
-          echo "sha_tag=$SHA_TAG" >> $GITHUB_OUTPUT
-          echo "version=$LATEST_VERSION" >> $GITHUB_OUTPUT
+      - name: Trigger LazyCat build
+        if: steps.check-update.outputs.update_needed == 'true' && inputs.publish_to_store == 'true'
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          event-type: publish-to-store
+          client-payload: '{"version": "${{ steps.get-version.outputs.latest_version }}", "image": "ghcr.io/${{ github.repository }}:v${{ steps.get-version.outputs.latest_version }}"}'

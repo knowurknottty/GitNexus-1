@@ -8,28 +8,37 @@ FROM node:20 AS builder
 RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 
 # Clone and build GitNexus web UI
+ARG VERSION=main
 RUN git clone https://github.com/abhigyanpatwari/GitNexus.git /tmp/gitnexus && \
     cd /tmp/gitnexus && \
-    git checkout {{VERSION}} && \
+    git checkout "${VERSION}" && \
     mv gitnexus-web /app
 
 WORKDIR /app
 
-RUN npm install
+# Install dependencies and build
+RUN npm ci --prefer-offline --no-audit
 RUN npm run build
 
 # ============================================
 # Stage 2: Runtime image with gitnexus CLI + nginx
 # ============================================
-FROM node:20
+FROM node:20-slim
+
+# Create non-root user for security
+RUN groupadd -r gitnexus && useradd -r -g gitnexus -s /sbin/nologin gitnexus
 
 WORKDIR /app
 
-# Install nginx and curl
-RUN apt-get update && apt-get install -y nginx curl && rm -rf /var/lib/apt/lists/*
+# Install nginx, curl, and git (required by gitnexus CLI)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends nginx curl git ca-certificates && \
+    rm -rf /var/lib/apt/lists/* && \
+    apt-get clean
 
 # Install global npm packages (use same version as frontend)
-RUN npm install -g serve gitnexus@$(echo {{VERSION}} | sed 's/v//')
+ARG VERSION=main
+RUN npm install -g serve gitnexus@$(echo "${VERSION}" | sed 's/v//')
 
 # Copy built frontend
 COPY --from=builder /app/dist ./dist
@@ -46,8 +55,14 @@ RUN chmod +x /entrypoint.sh
 # Create writable data directories for gitnexus metadata/database
 RUN mkdir -p /data/gitnexus-registry && chmod -R 777 /data
 
+# Set ownership for security
+RUN chown -R gitnexus:gitnexus /app /data
+
 # Expose nginx proxy port
 EXPOSE 8080
+
+# Switch to non-root user
+USER gitnexus
 
 # Health check
 HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=3 \
