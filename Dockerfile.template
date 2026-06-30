@@ -8,10 +8,17 @@ FROM node:20 AS builder
 RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 
 # Clone and build GitNexus web UI
+# Pin to a specific commit SHA for reproducible, tamper-resistant builds.
+# Override with: docker build --build-arg GIT_SHA=<commit-sha>
 ARG VERSION=main
+ARG GIT_SHA=
 RUN git clone https://github.com/abhigyanpatwari/GitNexus.git /tmp/gitnexus && \
     cd /tmp/gitnexus && \
-    git checkout "${VERSION}" && \
+    if [ -n "${GIT_SHA}" ]; then \
+      git checkout "${GIT_SHA}"; \
+    else \
+      git checkout "${VERSION}"; \
+    fi && \
     mv gitnexus-web /app
 
 WORKDIR /app
@@ -52,8 +59,10 @@ COPY docker/entrypoint.sh /entrypoint.sh
 COPY docker/proxy-server.mjs /proxy-server.mjs
 RUN chmod +x /entrypoint.sh
 
-# Create writable data directories for gitnexus metadata/database
-RUN mkdir -p /data/gitnexus-registry && chmod -R 777 /data
+# Create data directory with least-privilege permissions (no world-writable)
+RUN mkdir -p /data/gitnexus-registry && \
+    chown gitnexus:gitnexus /data && \
+    chmod 755 /data
 
 # Set ownership for security
 RUN chown -R gitnexus:gitnexus /app /data

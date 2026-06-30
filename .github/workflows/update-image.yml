@@ -158,6 +158,31 @@ jobs:
           provenance: true
           sbom: true
 
+      # ── Trivy vulnerability scan ──────────────────────────────
+      - name: Run Trivy vulnerability scanner
+        if: steps.check-update.outputs.update_needed == 'true'
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: ghcr.io/${{ github.repository }}:v${{ steps.get-version.outputs.latest_version }}
+          format: table
+          exit-code: '1'
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+
+      # ── Cosign image signing (keyless, OIDC) ──────────────────
+      - name: Install Cosign
+        if: steps.check-update.outputs.update_needed == 'true'
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign image with Cosign (keyless)
+        if: steps.check-update.outputs.update_needed == 'true'
+        env:
+          COSIGN_EXPERIMENTAL: '1'
+        run: |
+          cosign sign --yes \
+            ghcr.io/${{ github.repository }}:v${{ steps.get-version.outputs.latest_version }} \
+            ghcr.io/${{ github.repository }}:${{ github.sha }}
+
       - name: Update lzc-manifest.yml
         if: steps.check-update.outputs.update_needed == 'true'
         run: |
